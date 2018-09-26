@@ -7,8 +7,8 @@ defmodule EarthServer.Supervisor do
 
   def init(:ok) do
     children = [
-      {Task.Supervisor, name: EarthServer.TaskSupervisor},
-      Supervisor.child_spec({Task, fn -> EarthServer.accept() end}, restart: :permanent)
+      {DynamicSupervisor, strategy: :one_for_one, name: EarthServer.PlayerConnectionSupervisor},
+      Supervisor.child_spec({Task, fn -> EarthServer.open_port() end}, restart: :permanent)
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
