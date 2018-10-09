@@ -13,25 +13,68 @@ defmodule EarthServer do
   end
 
   def start_game(_server_socket, players) when length(players) == 5 do
+    Logger.info("Starting game")
+    rounds = []
+
     players
     |> shuffle_characters
-    |> start_round
-  end
-
-  def start_round(players) do
-    players
-    |> define_leader
-    |> leader_chooses
-    |> vote_phase(players)
-    |> evaluation_votes
-    |> start_mission(players)
-
-    start_round(players)
+    |> start_round(rounds)
   end
 
   def start_game(server_socket, players) do
     player_socket = wait_for_player(server_socket)
     start_game(server_socket, [player_socket | players])
+  end
+
+  def start_round(players, rounds) when length(rounds) < 5 do
+    {players_updated, rounds_updated} =
+      players
+      |> define_leader
+      |> leader_chooses
+      |> vote_phase
+      |> evaluation_votes
+      |> start_mission(rounds)
+
+    start_round(players_updated, rounds_updated)
+  end
+
+  ## TODO finish game
+  def start_round(players, rounds) when length(rounds) == 5 do
+    rounds_numbered = Enum.with_index(rounds, 1)
+
+    rounds_numbered
+    |> Enum.each(fn {mission_result, index} ->
+      players
+      |> Enum.each(fn {_, _, player_socket} ->
+        announce(player_socket, "Rodada #{index} - foi #{mission_result}")
+      end)
+    end)
+
+    ################# Caso o numero de falha seja maior que ?? o assassino tem que chutar o Merlin
+    players
+    |> Enum.each(fn {_, _, player_socket} ->
+      announce(player_socket, "O Assassino fará sua jogada final")
+    end)
+
+    {_, _, assassin} =
+      players
+      # merlin
+      |> Enum.filter(fn {persona, _, _} -> persona == "Assassin" end)
+      |> List.first()
+
+    minority =
+      players
+      # minions
+      |> Enum.filter(fn {persona, _, _} -> persona == "Minion" || persona == "Assassin" end)
+
+    announce(
+      assassin,
+      "Você deve dizer quem é o Merlin: #{
+        Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
+      }"
+    )
+
+    #################
   end
 
   def wait_for_player(socket) do
@@ -50,17 +93,51 @@ defmodule EarthServer do
   def shuffle_characters(players) do
     personas = ["Merlin", "Loyal", "Loyal", "Assassin", "Minion"]
 
-    List.zip([personas |> Enum.shuffle(), players |> Enum.shuffle()])
-    |> Enum.map(fn {persona, player_socket} ->
-      announce(player_socket, "Qual o seu nome?")
-      {persona, listen(player_socket), player_socket}
-    end)
-    |> enum_tap(fn {persona, _name, player_socket} ->
-      announce(player_socket, "Você é o: #{persona}")
+    Logger.info("Shuffling personas")
+
+    # Mistura e associa personas com jogadores
+    players_and_personas = List.zip([personas |> Enum.shuffle(), players |> Enum.shuffle()])
+
+    players =
+      players_and_personas
+      # Recebe o nome de cada player e associa tupla de cada posição
+      |> Enum.map(fn {persona, player_socket} ->
+        announce(player_socket, "Qual o seu nome?")
+        {persona, listen(player_socket), player_socket}
+      end)
+      # Divulga cada player qual sua persona
+      |> enum_tap(fn {persona, _name, player_socket} ->
+        announce(player_socket, "Você é o: #{persona}")
+      end)
+
+    minority =
+      players
+      # minions
+      |> Enum.filter(fn {persona, _, _} -> persona == "Minion" || persona == "Assassin" end)
+
+    {_, _, informer} =
+      players
+      |> Enum.filter(fn {persona, _, _} -> persona == "Merlin" end)
+      |> List.first()
+
+    minority
+    |> Enum.map(fn {_persona, _name, player_socket} ->
+      announce(
+        player_socket,
+        "A minoria informada são: #{
+          Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
+        }"
+      )
     end)
 
-    # minions devem se conhecer
-    # merlin deve conhecer os minions
+    announce(
+      informer,
+      "A minoria informada são: #{
+        Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
+      }"
+    )
+
+    players
   end
 
   def enum_tap(items, func) do
@@ -69,110 +146,150 @@ defmodule EarthServer do
   end
 
   def define_leader(players) do
+    Logger.info("Defining round leader")
     old_leader = players |> List.first()
 
-    IO.inspect(players: players)
-
-    new_players =
+    players_updated =
       players
       |> List.insert_at(-1, old_leader)
       |> List.delete_at(0)
 
-    IO.inspect(players: players, new_players: new_players)
-    new_players
+    players_updated
   end
 
   def leader_chooses(players) do
-    # lider diz quais jogadores vao pra missao
+    Logger.info("Leader chooses")
+    IO.inspect(players_leader_chooses: players)
     # numero de jogadores igual o contador da rodada
-    IO.inspect(players: players)
+
+    {_, leader_name, leader_socket} = players |> List.first()
+
+    players
+    |> Enum.map(&announce_players_the_leader(&1, leader_name))
 
     players
     |> Enum.map(&announce_players_leader_will_choose/1)
 
-    {_, _, leader_socket} = players |> List.first()
-
-    players_availale_to_be_soldiers =
+    players_available_to_be_soldiers =
       players
       |> Enum.filter(fn {_, _, socket} -> socket != leader_socket end)
 
-    players_names =
-      players_availale_to_be_soldiers
-      |> Enum.map(fn {_, name, _} -> name end)
-      |> Enum.with_index(1)
-      |> Enum.map(fn {name, index} ->
-        "#{index}. #{name}"
-      end)
-      |> Enum.join("\n")
+    players_names = extract_players_names(players_available_to_be_soldiers)
 
     announce(
       leader_socket,
-      "Escolha de 1-4 player: \n #{players_names} "
+      "Você é o líder da rodada. Escolha de 1-4 player: \n#{players_names} "
     )
 
     first =
-      players_availale_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
+      players_available_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
 
-    # remover a primeira escolha
+    players_available_to_be_soldiers = players_available_to_be_soldiers |> List.delete(first)
+
+    players_names = extract_players_names(players_available_to_be_soldiers)
+
     announce(
       leader_socket,
-      "Escolha de 1-4 player: \n #{players_names} "
+      "Escolha de 1-3 player: \n#{players_names} "
     )
 
     second =
-      players_availale_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
+      players_available_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
 
-    IO.inspect(first: first)
-    IO.inspect(second: second)
-
-    {first, second}
+    {first, second, players}
   end
 
-  def vote_phase({first, second}, players) do
+  def vote_phase({first, second, players}) do
+    Logger.info("Voting phase")
     {_, first_name, _} = first
     {_, second_name, _} = second
 
-    {players
+    [_ | voters] = players
+
+    {voters
      |> Enum.map(fn {_persona, _name, player_socket} ->
        announce(player_socket, "O lider escolheu #{first_name} e #{second_name} como soldados")
        announce(player_socket, "Vote [S] para aceitar ou [N] rejeitar essa escolha: ")
        listen(player_socket)
-     end), [first, second]}
+     end), [first, second], players}
   end
 
-  def evaluation_votes({votes, soldiers}) do
-    IO.inspect(votes: votes, soldiers: soldiers)
+  def extract_players_names(players) do
+    players
+    |> Enum.map(fn {_, name, _} -> name end)
+    |> Enum.with_index(1)
+    |> Enum.map(fn {name, index} ->
+      "#{index}. #{name}"
+    end)
+    |> Enum.join("\n")
+  end
+
+  def evaluation_votes({votes, soldiers, players}) do
+    [_ | voters] = players
+    votes_voters = voters |> Enum.map(fn {_, name, _} -> name end) |> Enum.zip(votes)
+
+    votes_voters
+    |> Enum.each(fn {player_name, vote} ->
+      players
+      |> Enum.each(fn {_persona, _name, player_socket} ->
+        announce(player_socket, "O #{player_name} votou #{vote}")
+      end)
+    end)
 
     {
-      Enum.count(votes, fn vote -> vote == "S" end) >= 3,
-      soldiers
+      Enum.count(votes, fn vote -> String.upcase(vote) == "S" end) >= 3,
+      soldiers,
+      players
     }
   end
 
-  def start_mission({true, soldiers}, players) do
+  def start_mission({true, soldiers, players}, rounds) do
+    Logger.info("Mission will start")
+    IO.inspect(players)
+
     players
     |> Enum.map(fn {_persona, _name, player_socket} ->
-      announce(player_socket, "Os soldados iram para missão, ela terá sucesso?")
+      announce(player_socket, "Os soldados irão para missão, ela terá sucesso?")
     end)
 
-    soldiers
+    mission_votes =
+      soldiers
+      |> Enum.map(fn {_persona, _name, player_socket} ->
+        announce(player_socket, "Vote [S] para sucesso ou [F] para falha")
+        listen(player_socket)
+      end)
+      |> Enum.shuffle()
+
+    failed? = Enum.count(mission_votes, fn vote -> String.upcase(vote) == "F" end) > 0
+    message = if failed?, do: "falha", else: "sucesso"
+
+    players
     |> Enum.map(fn {_persona, _name, player_socket} ->
-      announce(player_socket, "Vote [S] para sucesso ou [F] para falha")
-      listen(player_socket)
+      announce(
+        player_socket,
+        "As cartas foram #{Enum.join(mission_votes, " - ")}, e o resultado foi: #{message}"
+      )
     end)
+
+    rounds = [[message] | rounds]
+    {players, rounds}
   end
 
-  def start_mission({false, soldiers}, players) do
+  def start_mission({false, _soldiers, players}, rounds) do
     players
     |> Enum.map(fn {_persona, _name, player_socket} ->
       announce(player_socket, "Missão foi cancelada")
     end)
 
-    :failed
+    {players, rounds}
   end
 
   def announce_players_leader_will_choose({_persona, _name, player_socket}) do
     announce(player_socket, "O lider vai escolher seus soldados")
+  end
+
+  def announce_players_the_leader({_persona, _name, player_socket}, leader_name) do
+    announce(player_socket, "O lider da rodada é o #{leader_name}")
   end
 
   def announce(player_socket, message) do
