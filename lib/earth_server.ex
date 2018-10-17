@@ -1,3 +1,17 @@
+# Server
+# - Announcements
+# - User Input
+# - Socket Connection (Server Players)
+#
+# Game
+# - Game Rules
+# - Game Engine
+# - Player
+#
+# Infra
+# - Test
+# - Deploy
+# - Logger
 defmodule EarthServer do
   require Logger
 
@@ -38,9 +52,10 @@ defmodule EarthServer do
     start_round(players_updated, rounds_updated)
   end
 
-  ## TODO finish game
   def start_round(players, rounds) when length(rounds) == 5 do
     rounds_numbered = Enum.with_index(rounds, 1)
+
+    IO.inspect(rounds_numbered: rounds_numbered)
 
     rounds_numbered
     |> Enum.each(fn {mission_result, index} ->
@@ -50,31 +65,48 @@ defmodule EarthServer do
       end)
     end)
 
-    ################# Caso o numero de falha seja maior que ?? o assassino tem que chutar o Merlin
+    successful_rounds = Enum.count(List.flatten(rounds), fn result -> result == "sucesso" end)
+    ending_game(players, successful_rounds)
+  end
+
+  def ending_game(players, successful_rounds) when successful_rounds >= 3 do
     players
     |> Enum.each(fn {_, _, player_socket} ->
-      announce(player_socket, "O Assassino fará sua jogada final")
+      announce(player_socket, "\nO Assassino fará sua jogada final")
     end)
 
     {_, _, assassin} =
       players
-      # merlin
       |> Enum.filter(fn {persona, _, _} -> persona == "Assassin" end)
       |> List.first()
 
-    minority =
+    majority =
       players
-      # minions
-      |> Enum.filter(fn {persona, _, _} -> persona == "Minion" || persona == "Assassin" end)
+      |> Enum.filter(fn {persona, _, _} -> persona != "Minion" || persona != "Assassin" end)
+
+    players_names = extract_players_names(majority)
 
     announce(
       assassin,
-      "Você deve dizer quem é o Merlin: #{
-        Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
-      }"
+      "\nVocê deve dizer quem é o Merlin: \n#{players_names}"
     )
 
-    #################
+    {guessed_persona, guessed_merlin_name, _} =
+      majority |> Enum.at(String.to_integer(listen(assassin)) - 1)
+
+    players
+    |> Enum.each(fn {_, _, player_socket} ->
+      announce(
+        player_socket,
+        "\nO Assassino matou o #{guessed_merlin_name} que é #{guessed_persona}"
+      )
+    end)
+
+    finish_game(players, guessed_persona == "Merlin")
+  end
+
+  def ending_game(players, _) do
+    finish_game(players, true)
   end
 
   def wait_for_player(socket) do
@@ -107,7 +139,7 @@ defmodule EarthServer do
       end)
       # Divulga cada player qual sua persona
       |> enum_tap(fn {persona, _name, player_socket} ->
-        announce(player_socket, "Você é o: #{persona}")
+        announce(player_socket, "\nVocê é o: #{persona}")
       end)
 
     minority =
@@ -124,7 +156,7 @@ defmodule EarthServer do
     |> Enum.map(fn {_persona, _name, player_socket} ->
       announce(
         player_socket,
-        "A minoria informada são: #{
+        "\nA minoria informada são: #{
           Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
         }"
       )
@@ -132,7 +164,7 @@ defmodule EarthServer do
 
     announce(
       informer,
-      "A minoria informada são: #{
+      "\nA minoria informada são: #{
         Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
       }"
     )
@@ -178,11 +210,12 @@ defmodule EarthServer do
 
     announce(
       leader_socket,
-      "Você é o líder da rodada. Escolha de 1-4 player: \n#{players_names} "
+      "\nVocê é o líder da rodada. Escolha de 1-4 player: \n#{players_names} "
     )
 
     first =
-      players_available_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
+      players_available_to_be_soldiers
+      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^\d$/)) - 1)
 
     players_available_to_be_soldiers = players_available_to_be_soldiers |> List.delete(first)
 
@@ -190,11 +223,12 @@ defmodule EarthServer do
 
     announce(
       leader_socket,
-      "Escolha de 1-3 player: \n#{players_names} "
+      "\nEscolha de 1-3 player: \n#{players_names} "
     )
 
     second =
-      players_available_to_be_soldiers |> Enum.at(String.to_integer(listen(leader_socket)) - 1)
+      players_available_to_be_soldiers
+      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^\d$/)) - 1)
 
     {first, second, players}
   end
@@ -208,9 +242,9 @@ defmodule EarthServer do
 
     {voters
      |> Enum.map(fn {_persona, _name, player_socket} ->
-       announce(player_socket, "O lider escolheu #{first_name} e #{second_name} como soldados")
-       announce(player_socket, "Vote [S] para aceitar ou [N] rejeitar essa escolha: ")
-       listen(player_socket)
+       announce(player_socket, "\nO lider escolheu #{first_name} e #{second_name} como soldados")
+       announce(player_socket, "\nVote [A] para aceitar ou [R] rejeitar essa escolha: ")
+       listen(player_socket, ~r/^[arAR]$/)
      end), [first, second], players}
   end
 
@@ -237,7 +271,7 @@ defmodule EarthServer do
     end)
 
     {
-      Enum.count(votes, fn vote -> String.upcase(vote) == "S" end) >= 3,
+      Enum.count(votes, fn vote -> String.upcase(vote) == "A" end) >= 3,
       soldiers,
       players
     }
@@ -249,14 +283,14 @@ defmodule EarthServer do
 
     players
     |> Enum.map(fn {_persona, _name, player_socket} ->
-      announce(player_socket, "Os soldados irão para missão, ela terá sucesso?")
+      announce(player_socket, "\nOs soldados irão para missão, ela terá sucesso?")
     end)
 
     mission_votes =
       soldiers
       |> Enum.map(fn {_persona, _name, player_socket} ->
-        announce(player_socket, "Vote [S] para sucesso ou [F] para falha")
-        listen(player_socket)
+        announce(player_socket, "\nVote [S] para sucesso ou [F] para falha")
+        listen(player_socket, ~r/^[sfSF]$/)
       end)
       |> Enum.shuffle()
 
@@ -267,7 +301,7 @@ defmodule EarthServer do
     |> Enum.map(fn {_persona, _name, player_socket} ->
       announce(
         player_socket,
-        "As cartas foram #{Enum.join(mission_votes, " - ")}, e o resultado foi: #{message}"
+        "\nAs cartas foram #{Enum.join(mission_votes, " - ")}, e o resultado foi: #{message}"
       )
     end)
 
@@ -278,22 +312,33 @@ defmodule EarthServer do
   def start_mission({false, _soldiers, players}, rounds) do
     players
     |> Enum.map(fn {_persona, _name, player_socket} ->
-      announce(player_socket, "Missão foi cancelada")
+      announce(player_socket, "\nMissão foi cancelada")
     end)
 
     {players, rounds}
   end
 
   def announce_players_leader_will_choose({_persona, _name, player_socket}) do
-    announce(player_socket, "O lider vai escolher seus soldados")
+    announce(player_socket, "\nO lider vai escolher seus soldados")
   end
 
   def announce_players_the_leader({_persona, _name, player_socket}, leader_name) do
-    announce(player_socket, "O lider da rodada é o #{leader_name}")
+    announce(player_socket, "\nO lider da rodada é o #{leader_name}")
   end
 
   def announce(player_socket, message) do
     :gen_tcp.send(player_socket, "#{message}\n")
+  end
+
+  def listen(socket, validation) do
+    input = listen(socket)
+
+    if Regex.match?(validation, input) do
+      input
+    else
+      announce(socket, "Input não é valido, tente novamente")
+      listen(socket, validation)
+    end
   end
 
   def listen(player_socket) do
@@ -301,6 +346,25 @@ defmodule EarthServer do
     String.replace(data, ~r/\r|\n/, "")
   end
 
-  def finish_game do
+  def finish_game(players, true) do
+    players
+    |> Enum.each(fn {_, _, player_socket} ->
+      announce(player_socket, "A minoria venceu!")
+    end)
+
+    finish_game(players)
+  end
+
+  def finish_game(players, false) do
+    players
+    |> Enum.each(fn {_, _, player_socket} ->
+      announce(player_socket, "A maioria venceu!")
+    end)
+
+    finish_game(players)
+  end
+
+  def finish_game(players) do
+    players |> Enum.each(fn {_, _, socket} -> :gen_tcp.close(socket) end)
   end
 end
