@@ -1,0 +1,9 @@
+APP="earth_server"
+
+BUILD_HOST="18.209.35.66"
+BUILD_USER="admin"
+BUILD_AT="/tmp/edeliver/davidoff-server/builds"
+
+PRODUCTION_HOSTS="18.209.35.66"
+PRODUCTION_USER="admin"
+DELIVER_TO="/opt/davidoff"
