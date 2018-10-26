@@ -215,7 +215,7 @@ defmodule EarthServer do
 
     first =
       players_available_to_be_soldiers
-      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^\d$/)) - 1)
+      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^[1-4]$/)) - 1)
 
     players_available_to_be_soldiers = players_available_to_be_soldiers |> List.delete(first)
 
@@ -228,7 +228,7 @@ defmodule EarthServer do
 
     second =
       players_available_to_be_soldiers
-      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^\d$/)) - 1)
+      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^[1-3]$/)) - 1)
 
     {first, second, players}
   end
