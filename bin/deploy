@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-mix edeliver build release --branch=deploy --skip-git-clean
-mix edeliver deploy release to production --branch=deploy
-mix edeliver start production --branch=deploy
-mix edeliver ping production --branch=deploy
+mix edeliver build release --skip-git-clean
+mix edeliver deploy release to production
+mix edeliver start production
+mix edeliver ping production
