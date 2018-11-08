@@ -1,8 +1,9 @@
 defmodule EarthServer.Game.Player do
   defstruct name: :none,
-            socket: :none
+            socket: :none,
+            persona: :none
 
-  def new(name, socket) do
-    %__MODULE__{name: name, socket: socket}
+  def new(socket) do
+    %__MODULE__{socket: socket}
   end
 end

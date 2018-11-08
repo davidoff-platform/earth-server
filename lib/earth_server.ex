@@ -92,7 +92,7 @@ defmodule EarthServer do
     )
 
     {guessed_persona, guessed_merlin_name, _} =
-      majority |> Enum.at(String.to_integer(listen(assassin)) - 1)
+      majority |> Enum.at(String.to_integer(listen(assassin, ~r/[1-3]/)) - 1)
 
     players
     |> Enum.each(fn {_, _, player_socket} ->
@@ -115,11 +115,11 @@ defmodule EarthServer do
     {:ok, pid} =
       DynamicSupervisor.start_child(
         EarthServer.PlayerConnectionSupervisor,
-        {EarthServer.Player, %{}}
+        {EarthServer.PlayerAgent, player_socket}
       )
 
     :ok = :gen_tcp.controlling_process(player_socket, pid)
-    player_socket
+    pid
   end
 
   def shuffle_characters(players) do
@@ -128,36 +128,47 @@ defmodule EarthServer do
     Logger.info("Shuffling personas")
 
     # Mistura e associa personas com jogadores
-    players_and_personas = List.zip([personas |> Enum.shuffle(), players |> Enum.shuffle()])
 
-    players =
-      players_and_personas
-      # Recebe o nome de cada player e associa tupla de cada posição
-      |> Enum.map(fn {persona, player_socket} ->
-        announce(player_socket, "Qual o seu nome?")
-        {persona, listen(player_socket), player_socket}
+    names =
+      players
+      |> Enum.map(fn player ->
+        player |> EarthServer.PlayerAgent.socket()
       end)
-      # Divulga cada player qual sua persona
-      |> enum_tap(fn {persona, _name, player_socket} ->
-        announce(player_socket, "\nVocê é o: #{persona}")
+      |> enum_tap(fn socket ->
+        announce(socket, "Qual o seu nome?")
       end)
+      |> EarthServer.Communication.Listen.listen_many()
+
+    List.zip([players, personas |> Enum.shuffle(), names])
+    |> Enum.map(fn {player, persona, name} ->
+      player |> EarthServer.PlayerAgent.persona(persona)
+      player |> EarthServer.PlayerAgent.name(name)
+    end)
+
+    # -----
 
     minority =
       players
-      # minions
-      |> Enum.filter(fn {persona, _, _} -> persona == "Minion" || persona == "Assassin" end)
+      |> Enum.filter(fn player ->
+        persona = player |> EarthServer.PlayerAgent.persona()
+        persona == "Minion" || persona == "Assassin"
+      end)
 
     {_, _, informer} =
       players
-      |> Enum.filter(fn {persona, _, _} -> persona == "Merlin" end)
+      |> Enum.filter(fn player ->
+        persona = player |> EarthServer.PlayerAgent.persona()
+        persona == "Merlin"
+      end)
       |> List.first()
 
     minority
-    |> Enum.map(fn {_persona, _name, player_socket} ->
+    |> Enum.map(fn player ->
       announce(
-        player_socket,
+        player |> EarthServer.PlayerAgent.socket(),
         "\nA minoria informada são: #{
-          Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
+          Enum.map(minority, fn player2 -> player2 |> EarthServer.PlayerAgent.name() end)
+          |> Enum.join(" - ")
         }"
       )
     end)
@@ -165,7 +176,8 @@ defmodule EarthServer do
     announce(
       informer,
       "\nA minoria informada são: #{
-        Enum.map(minority, fn {_, name, _} -> name end) |> Enum.join(" - ")
+        Enum.map(minority, fn player -> player |> EarthServer.PlayerAgent.name() end)
+        |> Enum.join(" - ")
       }"
     )
 
@@ -194,41 +206,41 @@ defmodule EarthServer do
     IO.inspect(players_leader_chooses: players)
     # numero de jogadores igual o contador da rodada
 
-    {_, leader_name, leader_socket} = players |> List.first()
+    leader = players |> List.first()
 
     players
-    |> Enum.map(&announce_players_the_leader(&1, leader_name))
+    |> Enum.map(&announce_players_the_leader(&1, leader |> EarthServer.PlayerAgent.name()))
 
     players
     |> Enum.map(&announce_players_leader_will_choose/1)
 
     players_available_to_be_soldiers =
       players
-      |> Enum.filter(fn {_, _, socket} -> socket != leader_socket end)
+      |> Enum.filter(fn {_, _, socket} -> socket != leader end)
 
     players_names = extract_players_names(players_available_to_be_soldiers)
 
     announce(
-      leader_socket,
+      leader,
       "\nVocê é o líder da rodada. Escolha de 1-4 player: \n#{players_names} "
     )
 
     first =
       players_available_to_be_soldiers
-      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^[1-4]$/)) - 1)
+      |> Enum.at(String.to_integer(listen(leader, ~r/^[1-4]$/)) - 1)
 
     players_available_to_be_soldiers = players_available_to_be_soldiers |> List.delete(first)
 
     players_names = extract_players_names(players_available_to_be_soldiers)
 
     announce(
-      leader_socket,
+      leader,
       "\nEscolha de 1-3 player: \n#{players_names} "
     )
 
     second =
       players_available_to_be_soldiers
-      |> Enum.at(String.to_integer(listen(leader_socket, ~r/^[1-3]$/)) - 1)
+      |> Enum.at(String.to_integer(listen(leader, ~r/^[1-3]$/)) - 1)
 
     {first, second, players}
   end
@@ -241,11 +253,12 @@ defmodule EarthServer do
     [_ | voters] = players
 
     {voters
-     |> Enum.map(fn {_persona, _name, player_socket} ->
+     |> Enum.map(fn {_persona, _name, player_socket} -> player_socket end)
+     |> enum_tap(fn player_socket ->
        announce(player_socket, "\nO lider escolheu #{first_name} e #{second_name} como soldados")
        announce(player_socket, "\nVote [A] para aceitar ou [R] rejeitar essa escolha: ")
-       listen(player_socket, ~r/^[arAR]$/)
-     end), [first, second], players}
+     end)
+     |> EarthServer.Communication.Listen.listen_many(~r/^[arAR]$/), [first, second], players}
   end
 
   def extract_players_names(players) do
@@ -327,23 +340,11 @@ defmodule EarthServer do
   end
 
   def announce(player_socket, message) do
-    :gen_tcp.send(player_socket, "#{message}\n")
+    EarthServer.Communication.Announce.start_link(player_socket, message)
   end
 
   def listen(socket, validation) do
-    input = listen(socket)
-
-    if Regex.match?(validation, input) do
-      input
-    else
-      announce(socket, "Input não é valido, tente novamente")
-      listen(socket, validation)
-    end
-  end
-
-  def listen(player_socket) do
-    {:ok, data} = :gen_tcp.recv(player_socket, 0)
-    String.replace(data, ~r/\r|\n/, "")
+    EarthServer.Communication.Listen.listen(socket, validation)
   end
 
   def finish_game(players, true) do
