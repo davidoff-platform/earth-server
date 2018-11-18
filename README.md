@@ -19,3 +19,7 @@ Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_do
 and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
 be found at [https://hexdocs.pm/earth_server](https://hexdocs.pm/earth_server).
 
+
+TODO
+
+Criar Interactor - retirar EarthServer.Communication.Announce da implementacao interna

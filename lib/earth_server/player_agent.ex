@@ -5,35 +5,11 @@ defmodule EarthServer.PlayerAgent do
     Agent.start_link(fn -> %{socket: socket} end)
   end
 
-  # ----
-
-  # def socket(%Map{} = pid) do
-  #   player.socket
-  # end
-
-  def socket(pid) do
-    Agent.get(pid, fn player -> player.socket end)
+  def update(pid, key, value) do
+    Agent.update(pid, &Map.put(&1, key, value))
   end
 
-  def name(pid) do
-    Agent.get(pid, fn player -> player.name end)
-  end
-
-  def name(pid, name) do
-    Agent.update(pid, fn player ->
-      EarthServer.Communication.Announce.start_link(player.socket, "Ola #{name}")
-      Map.put(player, :name, name)
-    end)
-  end
-
-  def persona(pid, persona) do
-    Agent.update(pid, fn player ->
-      EarthServer.Communication.Announce.start_link(
-        player.socket,
-        "Seu personagem é o: #{persona}"
-      )
-
-      Map.put(player, :persona, persona)
-    end)
+  def get(pid, key) do
+    Agent.get(pid, &Map.fetch!(&1, key))
   end
 end
