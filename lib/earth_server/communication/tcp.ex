@@ -1,5 +1,6 @@
 defmodule EarthServer.Communication.TCP do
   use Task
+  alias EarthServer.PlayerAgent
 
   @behaviour EarthServer.Communication
 
@@ -10,7 +11,7 @@ defmodule EarthServer.Communication.TCP do
     Task.start_link(__MODULE__, :_announce, [socket, message])
   end
 
-  @spec announce(port, Regex.t()) :: any
+  @spec listen(port, Regex.t()) :: any
   def listen(socket, validation \\ ~r/.+/) do
     Task.async(__MODULE__, :_listen, [socket, validation]) |> Task.await(100_000)
   end
@@ -31,6 +32,16 @@ defmodule EarthServer.Communication.TCP do
     results = Task.yield_many(tasks, 1_000_000)
 
     Enum.map(results, fn {_, {:ok, result}} -> result end)
+  end
+
+  def announce_to_many(players, message) do
+    players
+    |> Enum.map(fn player ->
+      announce(
+        player |> PlayerAgent.get(:socket),
+        message
+      )
+    end)
   end
 
   # Private API
