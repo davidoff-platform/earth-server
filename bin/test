@@ -1,0 +1,14 @@
+#!/bin/bash
+
+(
+  ( mix run --no-halt ) &
+  ( sleep 3 && telnet localhost 4641 )
+  ( sleep 3 && telnet localhost 4641 )
+  ( sleep 3 && telnet localhost 4641 )
+  ( sleep 3 && telnet localhost 4641 )
+  ( sleep 3 && telnet localhost 4641 )
+
+)
+
+
+echo " test"

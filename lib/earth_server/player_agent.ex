@@ -1,17 +1,15 @@
 defmodule EarthServer.PlayerAgent do
   use Agent
 
-  def start_link([name, socket]) do
-    Agent.start_link(fn -> EarthServer.Game.Player.new(name, socket) end)
+  def start_link(socket) do
+    Agent.start_link(fn -> %{socket: socket} end)
   end
 
-  def get(player_agent) do
-    Agent.get(player_agent, fn player -> player end)
+  def update(pid, key, value) do
+    Agent.update(pid, &Map.put(&1, key, value))
   end
 
-  def define_name(player_agent, name) do
-    Agent.update(player_agent, fn player ->
-      %{player | name: name}
-    end)
+  def get(pid, key) do
+    Agent.get(pid, &Map.fetch!(&1, key))
   end
 end

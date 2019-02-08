@@ -1,6 +1,5 @@
 #!/bin/bash
 
-
 mix edeliver build release --skip-git-clean
 mix edeliver deploy release to production
 mix edeliver start production
